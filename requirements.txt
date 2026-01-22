@@ -1,0 +1,5 @@
+streamlit
+langchain-groq
+langchain-core
+pydantic
+graphviz
