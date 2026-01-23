@@ -642,332 +642,43 @@ with col1:
     }}
     """
     st.graphviz_chart(graph_code, use_container_width=True)
-    
-    # Inject JavaScript to add click handlers to graphviz nodes
-    step_ids_list = [step.id for step in steps]
-    step_ids_json = json.dumps(step_ids_list)
-    
-    javascript_code = f"""
-    <script>
-    (function() {{
-        function addClickHandlers() {{
-            // Find the graphviz SVG specifically (it should be in the workflow column)
-            // Be more specific to avoid interfering with other SVGs on the page
-            const workflowColumn = document.querySelector('[data-testid="stVerticalBlock"] > div:first-child');
-            if (!workflowColumn) {{
-                setTimeout(addClickHandlers, 200);
-                return;
-            }}
-            
-            const svgs = workflowColumn.querySelectorAll('svg');
-            if (svgs.length === 0) {{
-                // Retry if SVG not loaded yet
-                setTimeout(addClickHandlers, 200);
-                return;
-            }}
-            
-            const stepIds = {step_ids_json};
-            
-            svgs.forEach(svg => {{
-                // Ensure SVG remains fully interactive - don't modify SVG element or its container
-                // Only add click handlers to nodes, don't interfere with SVG-level events
-                
-                // Find all graphviz node groups - try multiple selectors
-                let nodes = svg.querySelectorAll('g.node');
-                if (nodes.length === 0) {{
-                    // Fallback: try all g elements and filter
-                    nodes = Array.from(svg.querySelectorAll('g')).filter(g => {{
-                        const id = g.getAttribute('id') || '';
-                        return id && !id.startsWith('edge') && id !== 'start';
-                    }});
-                }}
-                
-                console.log('Found', nodes.length, 'graphviz nodes, expecting', stepIds.length);
-                
-                // Create mapping: node index -> step ID (they should be in same order)
-                nodes.forEach((node, nodeIndex) => {{
-                    // Use index-based matching - nodes are in the same order as steps
-                    if (nodeIndex >= stepIds.length) return;
-                    
-                    const matchedStepId = stepIds[nodeIndex];
-                    const nodeId = node.getAttribute('id') || '';
-                    console.log('Node', nodeIndex, 'ID:', nodeId, '-> Step ID:', matchedStepId);
-                    
-                    if (matchedStepId) {{
-                        console.log('Setting up click handler for step:', matchedStepId);
-                        
-                        // Store step ID as data attribute for easy access
-                        node.setAttribute('data-step-id', matchedStepId);
-                        
-                        // Make node clickable with CSS only (don't interfere with events)
-                        node.style.cursor = 'pointer';
-                        node.style.transition = 'opacity 0.2s';
-                        
-                        // Add hover effect - use CSS pointer-events to ensure it doesn't block
-                        node.addEventListener('mouseenter', function(e) {{
-                            // Don't stop propagation - let hover work normally
-                            this.style.opacity = '0.7';
-                        }}, {{ passive: true }});
-                        
-                        node.addEventListener('mouseleave', function(e) {{
-                            this.style.opacity = '1';
-                        }}, {{ passive: true }});
-                        
-                        // Add click handler - be very careful not to interfere with other events
-                        // Use capture: false and only handle the specific click we want
-                        node.addEventListener('click', function(e) {{
-                            // Only handle simple left mouse button clicks (button 0)
-                            // Don't interfere with right-click, middle-click, or modifier keys
-                            if (e.button !== 0 || e.ctrlKey || e.metaKey || e.shiftKey || e.altKey) {{
-                                return; // Let the event propagate for zoom/pan
-                            }}
-                            
-                            // Only stop propagation AFTER we've handled it
-                            // This prevents the click from triggering other handlers
-                            // But we do this AFTER checking conditions, so wheel/drag still work
-                            const stepId = this.getAttribute('data-step-id') || matchedStepId;
-                            console.log('Step clicked:', stepId);
-                            
-                            // Stop propagation only for this specific click
-                            e.stopPropagation();
-                            
-                            // Visual feedback on clicked node
-                            const originalOpacity = this.style.opacity;
-                            this.style.opacity = '0.5';
-                            this.style.transform = 'scale(0.95)';
-                            setTimeout(() => {{
-                                this.style.opacity = originalOpacity || '1';
-                                this.style.transform = '';
-                            }}, 200);
-                            
-                            // Find JSON container - try multiple methods
-                            let jsonContainer = document.getElementById('json-container');
-                            if (!jsonContainer) {{
-                                jsonContainer = document.getElementById('json-container-wrapper');
-                            }}
-                            if (!jsonContainer) {{
-                                // Try to find st.json output container
-                                const stJsonElement = document.querySelector('[data-testid="stJson"]');
-                                if (stJsonElement) {{
-                                    jsonContainer = stJsonElement.closest('div[style*="overflow"]') || stJsonElement.parentElement;
-                                }}
-                            }}
-                            
-                            console.log('JSON container found:', !!jsonContainer);
-                            
-                            if (!jsonContainer) {{
-                                console.error('JSON container not found! Trying to find any scrollable container...');
-                                // Last resort: find any scrollable div in the right column
-                                const rightColumn = document.querySelector('[data-testid="stVerticalBlock"] > div:last-child');
-                                if (rightColumn) {{
-                                    jsonContainer = rightColumn.querySelector('div[style*="overflow"], div[style*="max-height"]') || rightColumn;
-                                    console.log('Using fallback container');
-                                }}
-                                if (!jsonContainer) return;
-                            }}
-                            
-                            // Find step ID in JSON using text search
-                            const jsonText = jsonContainer.textContent || jsonContainer.innerText || '';
-                            console.log('Searching for step ID:', stepId, 'in JSON (length:', jsonText.length, ')');
-                            
-                            const stepIdPattern = '"id"\\\\s*:\\\\s*"(' + stepId.replace(/[.*+?^${{}}()|[\\\\]\\\\]/g, '\\\\$&') + ')"';
-                            const regex = new RegExp(stepIdPattern);
-                            const match = regex.exec(jsonText);
-                            
-                            if (match) {{
-                                console.log('Found step ID at text position:', match.index);
-                                
-                                // Try to find the DOM element containing this text
-                                const allElements = Array.from(jsonContainer.querySelectorAll('*'));
-                                let targetElement = null;
-                                
-                                // Find element that contains the step ID and is closest to the match position
-                                for (const el of allElements) {{
-                                    const elText = el.textContent || '';
-                                    if (elText.includes('"id": "' + stepId + '"')) {{
-                                        // Check if this element's text starts before or at the match
-                                        const elStart = jsonText.indexOf(elText);
-                                        if (elStart >= 0 && elStart <= match.index && match.index < elStart + elText.length) {{
-                                            targetElement = el;
-                                            break;
-                                        }}
-                                    }}
-                                }}
-                                
-                                if (targetElement) {{
-                                    console.log('Found target element, scrolling to it');
-                                    targetElement.scrollIntoView({{ behavior: 'smooth', block: 'center' }});
-                                    
-                                    // Highlight
-                                    const originalBg = targetElement.style.backgroundColor;
-                                    targetElement.style.backgroundColor = '#fff3cd';
-                                    targetElement.style.transition = 'background-color 0.3s';
-                                    setTimeout(() => {{
-                                        targetElement.style.backgroundColor = originalBg || '';
-                                    }}, 3000);
-                                }} else {{
-                                    console.log('Target element not found, using text position calculation');
-                                    // Calculate scroll position from text position
-                                    const textBefore = jsonText.substring(0, match.index);
-                                    const newlinesBefore = (textBefore.match(/\\\\n/g) || []).length;
-                                    const lineHeight = 22; // Approximate line height in pixels
-                                    const scrollPos = newlinesBefore * lineHeight;
-                                    
-                                    console.log('Calculated scroll position:', scrollPos);
-                                    jsonContainer.scrollTo({{
-                                        top: Math.max(0, scrollPos - 100),
-                                        behavior: 'smooth'
-                                    }});
-                                    
-                                    // Try to highlight by finding and highlighting text
-                                    const range = document.createRange();
-                                    const walker = document.createTreeWalker(
-                                        jsonContainer,
-                                        NodeFilter.SHOW_TEXT,
-                                        null
-                                    );
-                                    
-                                    let textNode;
-                                    while (textNode = walker.nextNode()) {{
-                                        const nodeText = textNode.textContent;
-                                        const stepIdIndex = nodeText.indexOf('"id": "' + stepId + '"');
-                                        if (stepIdIndex >= 0) {{
-                                            try {{
-                                                range.setStart(textNode, stepIdIndex);
-                                                range.setEnd(textNode, stepIdIndex + stepId.length + 10);
-                                                const highlight = document.createElement('span');
-                                                highlight.style.backgroundColor = '#fff3cd';
-                                                range.surroundContents(highlight);
-                                                setTimeout(() => {{
-                                                    if (highlight.parentNode) {{
-                                                        highlight.parentNode.replaceChild(textNode, highlight);
-                                                    }}
-                                                }}, 3000);
-                                            }} catch(e) {{
-                                                console.log('Could not highlight:', e);
-                                            }}
-                                            break;
-                                        }}
-                                    }}
-                                }}
-                            }} else {{
-                                console.warn('Step ID not found in JSON text:', stepId);
-                            }}
-                        }});
-                    }} else {{
-                        console.log('No match found for node:', nodeId);
-                    }}
-                }});
-            }});
-        }}
-        
-        // Wait for page to load and SVG to render
-        if (document.readyState === 'loading') {{
-            document.addEventListener('DOMContentLoaded', addClickHandlers);
-        }} else {{
-            addClickHandlers();
-        }}
-        
-        // Retry after delays to catch dynamically loaded content
-        setTimeout(addClickHandlers, 500);
-        setTimeout(addClickHandlers, 1000);
-    }})();
-    </script>
-    """
-    st.markdown(javascript_code, unsafe_allow_html=True)
 
 with col2:
     st.markdown("### 🛠️ Configuration")
     st.caption("Live JSON generated by Llama 3")
-    # Use container to wrap JSON and make it scrollable
-    json_container = st.container()
-    with json_container:
-        # Add wrapper div with ID for JavaScript targeting
-        st.markdown('<div id="json-container-wrapper" style="max-height: 600px; overflow-y: auto; overflow-x: auto; border: 1px solid #ddd; border-radius: 5px; padding: 10px;">', unsafe_allow_html=True)
-        st.json(st.session_state.workflow_data.model_dump())
-        st.markdown('</div>', unsafe_allow_html=True)
     
-    # Add JavaScript to find and mark the actual JSON container
-    container_script = """
-    <script>
-    (function() {
-        function findJsonContainer() {
-            // st.json() creates elements with specific structure
-            // Find the actual scrollable container
-            const wrapper = document.getElementById('json-container-wrapper');
-            if (!wrapper) {
-                setTimeout(findJsonContainer, 200);
-                return;
-            }
-            
-            // Find the actual JSON element inside
-            const jsonElement = wrapper.querySelector('[data-testid="stJson"], .stJson, pre, code, div');
-            if (jsonElement) {
-                // Set ID on the wrapper so we can scroll it
-                wrapper.id = 'json-container';
-                console.log('JSON container ID set on wrapper');
-            } else {
-                // If no specific element found, use wrapper itself
-                wrapper.id = 'json-container';
-                console.log('Using wrapper as JSON container');
-            }
-        }
-        
-        if (document.readyState === 'loading') {
-            document.addEventListener('DOMContentLoaded', findJsonContainer);
-        } else {
-            findJsonContainer();
-        }
-        setTimeout(findJsonContainer, 500);
-        setTimeout(findJsonContainer, 1000);
-    })();
-    </script>
-    """
-    st.markdown(container_script, unsafe_allow_html=True)
+    # Create a scrollable container for JSON with proper styling
+    st.markdown("""
+    <style>
+    .json-scroll-container {
+        max-height: 600px;
+        overflow-y: auto;
+        overflow-x: auto;
+        border: 1px solid #ddd;
+        border-radius: 5px;
+        padding: 15px;
+        background-color: #f8f9fa;
+        box-shadow: inset 0 1px 3px rgba(0,0,0,0.1);
+    }
+    .json-scroll-container::-webkit-scrollbar {
+        width: 8px;
+        height: 8px;
+    }
+    .json-scroll-container::-webkit-scrollbar-track {
+        background: #f1f1f1;
+        border-radius: 4px;
+    }
+    .json-scroll-container::-webkit-scrollbar-thumb {
+        background: #888;
+        border-radius: 4px;
+    }
+    .json-scroll-container::-webkit-scrollbar-thumb:hover {
+        background: #555;
+    }
+    </style>
+    """, unsafe_allow_html=True)
     
-    # Add minimal script to verify JSON container is ready (for debugging)
-    steps = st.session_state.workflow_data.steps
-    if steps:
-        step_ids_json = json.dumps([step.id for step in steps])
-        debug_script = f"""
-        <script>
-        (function() {{
-            function verifyJsonContainer() {{
-                // Try multiple possible container IDs
-                let container = document.getElementById('json-container');
-                if (!container) {{
-                    container = document.getElementById('json-container-wrapper');
-                }}
-                if (!container) {{
-                    // Try to find st.json output
-                    container = document.querySelector('[data-testid="stJson"]')?.parentElement;
-                }}
-                
-                if (container) {{
-                    console.log('JSON container verified, scrollable:', container.scrollHeight > container.clientHeight);
-                    const jsonText = container.textContent || container.innerText || '';
-                    console.log('JSON text available, length:', jsonText.length);
-                    const stepIds = {step_ids_json};
-                    stepIds.forEach(stepId => {{
-                        if (jsonText.includes('"id": "' + stepId + '"')) {{
-                            console.log('Step ID found in JSON:', stepId);
-                        }} else {{
-                            console.warn('Step ID NOT found in JSON:', stepId);
-                        }}
-                    }});
-                }} else {{
-                    console.warn('JSON container not found yet');
-                    setTimeout(verifyJsonContainer, 200);
-                }}
-            }}
-            
-            if (document.readyState === 'loading') {{
-                document.addEventListener('DOMContentLoaded', verifyJsonContainer);
-            }} else {{
-                verifyJsonContainer();
-            }}
-            setTimeout(verifyJsonContainer, 500);
-        }})();
-        </script>
-        """
-        st.markdown(debug_script, unsafe_allow_html=True)
+    # Wrap JSON in scrollable container
+    st.markdown('<div class="json-scroll-container" id="json-container">', unsafe_allow_html=True)
+    st.json(st.session_state.workflow_data.model_dump())
+    st.markdown('</div>', unsafe_allow_html=True)
