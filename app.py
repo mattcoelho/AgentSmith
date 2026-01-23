@@ -651,8 +651,15 @@ with col1:
     <script>
     (function() {{
         function addClickHandlers() {{
-            // Find all SVG elements (graphviz renders as SVG)
-            const svgs = document.querySelectorAll('svg');
+            // Find the graphviz SVG specifically (it should be in the workflow column)
+            // Be more specific to avoid interfering with other SVGs on the page
+            const workflowColumn = document.querySelector('[data-testid="stVerticalBlock"] > div:first-child');
+            if (!workflowColumn) {{
+                setTimeout(addClickHandlers, 200);
+                return;
+            }}
+            
+            const svgs = workflowColumn.querySelectorAll('svg');
             if (svgs.length === 0) {{
                 // Retry if SVG not loaded yet
                 setTimeout(addClickHandlers, 200);
@@ -662,6 +669,9 @@ with col1:
             const stepIds = {step_ids_json};
             
             svgs.forEach(svg => {{
+                // Ensure SVG remains fully interactive - don't modify SVG element or its container
+                // Only add click handlers to nodes, don't interfere with SVG-level events
+                
                 // Find all graphviz node groups - try multiple selectors
                 let nodes = svg.querySelectorAll('g.node');
                 if (nodes.length === 0) {{
@@ -686,22 +696,40 @@ with col1:
                     if (matchedStepId) {{
                         console.log('Setting up click handler for step:', matchedStepId);
                         
-                        // Make node clickable
+                        // Store step ID as data attribute for easy access
+                        node.setAttribute('data-step-id', matchedStepId);
+                        
+                        // Make node clickable with CSS only (don't interfere with events)
                         node.style.cursor = 'pointer';
                         node.style.transition = 'opacity 0.2s';
                         
-                        // Add hover effect
-                        node.addEventListener('mouseenter', function() {{
+                        // Add hover effect - use CSS pointer-events to ensure it doesn't block
+                        node.addEventListener('mouseenter', function(e) {{
+                            // Don't stop propagation - let hover work normally
                             this.style.opacity = '0.7';
-                        }});
-                        node.addEventListener('mouseleave', function() {{
-                            this.style.opacity = '1';
-                        }});
+                        }}, {{ passive: true }});
                         
-                        // Add click handler
+                        node.addEventListener('mouseleave', function(e) {{
+                            this.style.opacity = '1';
+                        }}, {{ passive: true }});
+                        
+                        // Add click handler - be very careful not to interfere with other events
+                        // Use capture: false and only handle the specific click we want
                         node.addEventListener('click', function(e) {{
+                            // Only handle simple left mouse button clicks (button 0)
+                            // Don't interfere with right-click, middle-click, or modifier keys
+                            if (e.button !== 0 || e.ctrlKey || e.metaKey || e.shiftKey || e.altKey) {{
+                                return; // Let the event propagate for zoom/pan
+                            }}
+                            
+                            // Only stop propagation AFTER we've handled it
+                            // This prevents the click from triggering other handlers
+                            // But we do this AFTER checking conditions, so wheel/drag still work
+                            const stepId = this.getAttribute('data-step-id') || matchedStepId;
+                            console.log('Step clicked:', stepId);
+                            
+                            // Stop propagation only for this specific click
                             e.stopPropagation();
-                            console.log('Step clicked:', matchedStepId);
                             
                             // Visual feedback on clicked node
                             const originalOpacity = this.style.opacity;
@@ -740,9 +768,9 @@ with col1:
                             
                             // Find step ID in JSON using text search
                             const jsonText = jsonContainer.textContent || jsonContainer.innerText || '';
-                            console.log('Searching for step ID:', matchedStepId, 'in JSON (length:', jsonText.length, ')');
+                            console.log('Searching for step ID:', stepId, 'in JSON (length:', jsonText.length, ')');
                             
-                            const stepIdPattern = '"id"\\\\s*:\\\\s*"(' + matchedStepId.replace(/[.*+?^${{}}()|[\\\\]\\\\]/g, '\\\\$&') + ')"';
+                            const stepIdPattern = '"id"\\\\s*:\\\\s*"(' + stepId.replace(/[.*+?^${{}}()|[\\\\]\\\\]/g, '\\\\$&') + ')"';
                             const regex = new RegExp(stepIdPattern);
                             const match = regex.exec(jsonText);
                             
@@ -756,7 +784,7 @@ with col1:
                                 // Find element that contains the step ID and is closest to the match position
                                 for (const el of allElements) {{
                                     const elText = el.textContent || '';
-                                    if (elText.includes('"id": "' + matchedStepId + '"')) {{
+                                    if (elText.includes('"id": "' + stepId + '"')) {{
                                         // Check if this element's text starts before or at the match
                                         const elStart = jsonText.indexOf(elText);
                                         if (elStart >= 0 && elStart <= match.index && match.index < elStart + elText.length) {{
@@ -802,11 +830,11 @@ with col1:
                                     let textNode;
                                     while (textNode = walker.nextNode()) {{
                                         const nodeText = textNode.textContent;
-                                        const stepIdIndex = nodeText.indexOf('"id": "' + matchedStepId + '"');
+                                        const stepIdIndex = nodeText.indexOf('"id": "' + stepId + '"');
                                         if (stepIdIndex >= 0) {{
                                             try {{
                                                 range.setStart(textNode, stepIdIndex);
-                                                range.setEnd(textNode, stepIdIndex + matchedStepId.length + 10);
+                                                range.setEnd(textNode, stepIdIndex + stepId.length + 10);
                                                 const highlight = document.createElement('span');
                                                 highlight.style.backgroundColor = '#fff3cd';
                                                 range.surroundContents(highlight);
@@ -823,7 +851,7 @@ with col1:
                                     }}
                                 }}
                             }} else {{
-                                console.warn('Step ID not found in JSON text:', matchedStepId);
+                                console.warn('Step ID not found in JSON text:', stepId);
                             }}
                         }});
                     }} else {{
