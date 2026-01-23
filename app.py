@@ -51,6 +51,7 @@ else:
 
 llm = ChatGroq(model="llama-3.3-70b-versatile", api_key=api_key)
 parser = PydanticOutputParser(pydantic_object=Workflow)
+format_instructions = parser.get_format_instructions()
 
 system_prompt = """
 You are an expert Automation Architect for a platform like Relay.app or Zapier.
@@ -59,11 +60,31 @@ Your goal is to interpret natural language requests and UPDATE the current workf
 CURRENT WORKFLOW STATE:
 {current_state}
 
+SCHEMA REQUIREMENTS:
+{format_instructions}
+
+CRITICAL: Each step in the "steps" array MUST have exactly these 4 required fields:
+- "id": A unique identifier string (e.g., "step_1", "step_2")
+- "app": The app/service name (e.g., "Slack", "Gmail", "Linear", "Customer Support System")
+- "action": The action description (e.g., "Send Message", "Create Ticket", "Categorize Issue")
+- "details": A short summary of configuration (e.g., "Channel: #support", "Category: refund")
+
+EXAMPLE of a correct step:
+{{
+  "id": "step_1",
+  "app": "Slack",
+  "action": "Send Message",
+  "details": "Channel: #support"
+}}
+
+DO NOT use fields like "name", "next_steps", or "condition" in steps. Only use: id, app, action, details.
+
 INSTRUCTIONS:
 1. Analyze the user's request.
 2. If they are CREATING a new flow, overwrite the current state.
 3. If they are MODIFYING (e.g., "add a delay", "change slack channel"), update the existing steps intelligently.
 4. Output ONLY valid JSON matching the Workflow schema. No chat, no markdown.
+5. Ensure every step has all 4 required fields: id, app, action, details.
 """
 
 prompt = ChatPromptTemplate.from_messages([
@@ -91,7 +112,8 @@ with st.sidebar:
                 chain = prompt | llm | parser
                 new_workflow = chain.invoke({
                     "current_state": current_json,
-                    "user_input": user_input
+                    "user_input": user_input,
+                    "format_instructions": format_instructions
                 })
                 st.session_state.workflow_data = new_workflow
                 bot_msg = f"Updated workflow: **{new_workflow.name}** with {len(new_workflow.steps)} steps."
