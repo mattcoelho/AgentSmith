@@ -56,6 +56,11 @@ llm = ChatGroq(
     api_key=api_key,
     model_kwargs={"response_format": {"type": "json_object"}}
 )
+# Separate LLM for conversational responses (without JSON mode)
+conversational_llm = ChatGroq(
+    model="llama-3.3-70b-versatile",
+    api_key=api_key
+)
 parser = PydanticOutputParser(pydantic_object=Workflow)
 format_instructions = parser.get_format_instructions()
 
@@ -209,6 +214,40 @@ prompt = ChatPromptTemplate.from_messages([
     ("user", "{user_input}"),
 ])
 
+# Conversational prompt for friendly responses
+conversational_prompt = ChatPromptTemplate.from_messages([
+    ("system", """You are a friendly and helpful Workflow Architect assistant. 
+After creating or updating a workflow, provide a conversational, engaging response that:
+- Acknowledges what the user asked for
+- Explains what workflow was created or modified in a friendly way
+- Summarizes the key steps naturally
+- Highlights interesting aspects
+- Asks helpful follow-up questions when appropriate
+- Keeps responses concise (2-3 sentences typically)
+- Uses a warm, professional tone
+
+Be conversational and helpful, not robotic."""),
+    ("user", """User request: {user_input}
+
+Generated workflow:
+{workflow_summary}
+
+Provide a friendly, conversational response explaining what workflow was created or modified. Be engaging and helpful.""")
+])
+
+# Function to format workflow as a readable summary for conversational LLM
+def format_workflow_summary(workflow: Workflow) -> str:
+    """Format a workflow into a readable text summary."""
+    summary = f"Workflow Name: {workflow.name}\n"
+    summary += f"Trigger: {workflow.trigger}\n"
+    summary += f"Steps ({len(workflow.steps)}):\n"
+    for i, step in enumerate(workflow.steps, 1):
+        summary += f"  {i}. {step.app} - {step.action}"
+        if step.details:
+            summary += f" ({step.details})"
+        summary += "\n"
+    return summary
+
 # --- 5. SIDEBAR: CHAT ---
 with st.sidebar:
     st.markdown("### 💬 Architect Chat")
@@ -233,7 +272,15 @@ with st.sidebar:
                     "format_instructions": format_instructions
                 })
                 st.session_state.workflow_data = new_workflow
-                bot_msg = f"Updated workflow: **{new_workflow.name}** with {len(new_workflow.steps)} steps."
+                
+                # Generate conversational response
+                workflow_summary = format_workflow_summary(new_workflow)
+                conversational_chain = conversational_prompt | conversational_llm
+                conversational_response = conversational_chain.invoke({
+                    "user_input": user_input,
+                    "workflow_summary": workflow_summary
+                })
+                bot_msg = conversational_response.content
                 st.session_state.messages.append({"role": "assistant", "content": bot_msg})
                 st.rerun()
             except ValidationError as e:
@@ -279,18 +326,54 @@ with st.sidebar:
                 error_msg += "\n**Forbidden fields:** `type`, `config`, `name` (in steps), `next_steps`, `condition`\n"
                 
                 st.error(error_msg)
+                
+                # Generate conversational error response
+                error_conversational_prompt = ChatPromptTemplate.from_messages([
+                    ("system", """You are a friendly Workflow Architect assistant. 
+When there's a validation error, provide a helpful, conversational response that:
+- Acknowledges the error in a friendly way
+- Suggests how to fix it
+- Encourages the user to try again with clearer instructions
+- Keeps it brief and helpful"""),
+                    ("user", """The user requested: {user_input}
+
+A validation error occurred. The workflow I tried to generate had missing or incorrect fields.
+
+Provide a friendly, helpful response asking the user to rephrase their request with simpler, more direct instructions.""")
+                ])
+                error_response = (error_conversational_prompt | conversational_llm).invoke({
+                    "user_input": user_input
+                })
                 st.session_state.messages.append({
                     "role": "assistant", 
-                    "content": "I encountered a validation error. Please try rephrasing your request with simpler, more direct instructions."
+                    "content": error_response.content
                 })
             except Exception as e:
                 error_msg = f"**Error:** {str(e)}\n\n"
                 error_msg += "This might be due to the AI generating invalid JSON or not following the schema. "
                 error_msg += "Please try rephrasing your request."
                 st.error(error_msg)
+                
+                # Generate conversational error response
+                error_conversational_prompt = ChatPromptTemplate.from_messages([
+                    ("system", """You are a friendly Workflow Architect assistant. 
+When there's an error processing a request, provide a helpful, conversational response that:
+- Acknowledges the error in a friendly way
+- Suggests the user try again with a clearer description
+- Keeps it brief and encouraging"""),
+                    ("user", """The user requested: {user_input}
+
+An error occurred while processing the request: {error_message}
+
+Provide a friendly, helpful response asking the user to try again with a clearer description.""")
+                ])
+                error_response = (error_conversational_prompt | conversational_llm).invoke({
+                    "user_input": user_input,
+                    "error_message": str(e)
+                })
                 st.session_state.messages.append({
                     "role": "assistant", 
-                    "content": "I encountered an error processing your request. Please try again with a clearer description."
+                    "content": error_response.content
                 })
 
 # --- 6. MAIN PANEL: VISUALIZATION ---
