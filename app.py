@@ -1,7 +1,8 @@
 import streamlit as st
 import json
+import re
 from typing import List, Optional
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 from langchain_groq import ChatGroq
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import PydanticOutputParser
@@ -49,7 +50,12 @@ else:
     st.error("🚨 GROQ_API_KEY missing from secrets.")
     st.stop()
 
-llm = ChatGroq(model="llama-3.3-70b-versatile", api_key=api_key)
+# Enable JSON mode for structured output
+llm = ChatGroq(
+    model="llama-3.3-70b-versatile", 
+    api_key=api_key,
+    model_kwargs={"response_format": {"type": "json_object"}}
+)
 parser = PydanticOutputParser(pydantic_object=Workflow)
 format_instructions = parser.get_format_instructions()
 
@@ -63,28 +69,139 @@ CURRENT WORKFLOW STATE:
 SCHEMA REQUIREMENTS:
 {format_instructions}
 
-CRITICAL: Each step in the "steps" array MUST have exactly these 4 required fields:
-- "id": A unique identifier string (e.g., "step_1", "step_2")
-- "app": The app/service name (e.g., "Slack", "Gmail", "Linear", "Customer Support System")
-- "action": The action description (e.g., "Send Message", "Create Ticket", "Categorize Issue")
-- "details": A short summary of configuration (e.g., "Channel: #support", "Category: refund")
+================================================================================
+🚫 FORBIDDEN FIELDS - NEVER USE THESE IN STEPS:
+================================================================================
+The following fields are FORBIDDEN and will cause validation errors:
+- "name" (use "id" instead)
+- "type" (FORBIDDEN - do not use)
+- "config" (FORBIDDEN - do not use)
+- "next_steps" (FORBIDDEN - do not use)
+- "condition" (FORBIDDEN - do not use)
+- Any nested objects or arrays in steps
 
-EXAMPLE of a correct step:
+================================================================================
+✅ REQUIRED FIELDS - EVERY STEP MUST HAVE EXACTLY THESE 4 FIELDS:
+================================================================================
+Each step in the "steps" array MUST have exactly these 4 required fields (no more, no less):
+1. "id": A unique identifier string (e.g., "step_1", "step_2", "step_3")
+2. "app": The app/service name (e.g., "Slack", "Gmail", "Linear", "Customer Support System", "Ecommerce Platform")
+3. "action": The action description (e.g., "Send Message", "Create Ticket", "Categorize Issue", "Find Order")
+4. "details": A short summary of configuration (e.g., "Channel: #support", "Category: refund", "Search by customer name")
+
+================================================================================
+✅ CORRECT EXAMPLES:
+================================================================================
+
+EXAMPLE 1 - Simple Slack Notification:
 {{
-  "id": "step_1",
-  "app": "Slack",
-  "action": "Send Message",
-  "details": "Channel: #support"
+  "name": "New Lead Alert",
+  "trigger": "New Form Submission",
+  "steps": [
+    {{
+      "id": "step_1",
+      "app": "Slack",
+      "action": "Send Message",
+      "details": "Channel: #sales, Message: New lead received"
+    }}
+  ]
 }}
 
-DO NOT use fields like "name", "next_steps", or "condition" in steps. Only use: id, app, action, details.
+EXAMPLE 2 - Multi-Step Ecommerce Workflow:
+{{
+  "name": "Order Issue Handler",
+  "trigger": "New Customer Message",
+  "steps": [
+    {{
+      "id": "step_1",
+      "app": "Customer Support System",
+      "action": "Categorize Issue",
+      "details": "Categories: refund, replacement, cancellation"
+    }},
+    {{
+      "id": "step_2",
+      "app": "Ecommerce Platform",
+      "action": "Find Customer Order",
+      "details": "Search by customer name and order number"
+    }},
+    {{
+      "id": "step_3",
+      "app": "Ecommerce Platform",
+      "action": "Get Order Status",
+      "details": "Retrieve shipping and delivery status"
+    }}
+  ]
+}}
 
+EXAMPLE 3 - Customer Support Flow:
+{{
+  "name": "Support Ticket Automation",
+  "trigger": "New Support Email",
+  "steps": [
+    {{
+      "id": "step_1",
+      "app": "Gmail",
+      "action": "Send Auto-Reply",
+      "details": "Template: acknowledgment message"
+    }},
+    {{
+      "id": "step_2",
+      "app": "Linear",
+      "action": "Create Ticket",
+      "details": "Project: Support, Priority: High"
+    }},
+    {{
+      "id": "step_3",
+      "app": "Slack",
+      "action": "Notify Team",
+      "details": "Channel: #support-alerts"
+    }}
+  ]
+}}
+
+================================================================================
+❌ INCORRECT EXAMPLES - DO NOT GENERATE THESE:
+================================================================================
+
+WRONG - Using forbidden "type" and "config" fields:
+{{
+  "action": "Categorize Issue",
+  "type": "AI-Powered Issue Categorization",  ❌ FORBIDDEN
+  "config": {{"categories": [...]}}  ❌ FORBIDDEN
+}}
+
+WRONG - Missing required fields:
+{{
+  "name": "Categorize Issue",  ❌ Should be "id", not "name"
+  "action": "Categorize Issue"  ❌ Missing "app" and "details"
+}}
+
+WRONG - Using nested objects:
+{{
+  "id": "step_1",
+  "app": "Ecommerce Platform",
+  "action": "Find Order",
+  "config": {{"searchParams": {{"customerName": "..."}}}}  ❌ No nested objects
+}}
+
+CORRECT VERSION of the above:
+{{
+  "id": "step_1",
+  "app": "Ecommerce Platform",
+  "action": "Find Customer Order",
+  "details": "Search by customer name and order number"
+}}
+
+================================================================================
 INSTRUCTIONS:
+================================================================================
 1. Analyze the user's request.
 2. If they are CREATING a new flow, overwrite the current state.
 3. If they are MODIFYING (e.g., "add a delay", "change slack channel"), update the existing steps intelligently.
-4. Output ONLY valid JSON matching the Workflow schema. No chat, no markdown.
-5. Ensure every step has all 4 required fields: id, app, action, details.
+4. Output ONLY valid JSON matching the Workflow schema. No chat, no markdown, no code blocks.
+5. EVERY step MUST have exactly these 4 fields: id, app, action, details.
+6. NEVER use: type, config, name (in steps), next_steps, condition, or nested objects.
+7. If the user describes complex logic, simplify it into sequential steps with clear actions.
 """
 
 prompt = ChatPromptTemplate.from_messages([
@@ -119,8 +236,62 @@ with st.sidebar:
                 bot_msg = f"Updated workflow: **{new_workflow.name}** with {len(new_workflow.steps)} steps."
                 st.session_state.messages.append({"role": "assistant", "content": bot_msg})
                 st.rerun()
+            except ValidationError as e:
+                # Parse validation errors to show missing fields clearly
+                error_messages = []
+                step_errors = {}
+                
+                for error in e.errors():
+                    if "steps" in str(error.get("loc", [])):
+                        # Extract step index from error location
+                        loc = error.get("loc", ())
+                        step_idx = None
+                        for i, item in enumerate(loc):
+                            if item == "steps" and i + 1 < len(loc):
+                                step_idx = loc[i + 1]
+                                break
+                        
+                        field = error.get("loc", ())[-1] if loc else "unknown"
+                        msg = error.get("msg", "Validation error")
+                        
+                        if step_idx is not None:
+                            if step_idx not in step_errors:
+                                step_errors[step_idx] = []
+                            step_errors[step_idx].append(f"Missing required field: '{field}'")
+                
+                # Build user-friendly error message
+                error_msg = "**Workflow Validation Error**\n\n"
+                error_msg += "The AI generated workflow steps with missing or incorrect fields.\n\n"
+                
+                if step_errors:
+                    error_msg += "**Issues by step:**\n"
+                    for step_idx, errors in sorted(step_errors.items()):
+                        error_msg += f"\n**Step {step_idx + 1}:**\n"
+                        for err in errors:
+                            error_msg += f"  - {err}\n"
+                
+                error_msg += "\n**Required fields for each step:**\n"
+                error_msg += "  - `id`: Unique identifier (e.g., 'step_1')\n"
+                error_msg += "  - `app`: App/service name (e.g., 'Slack', 'Gmail')\n"
+                error_msg += "  - `action`: Action description (e.g., 'Send Message')\n"
+                error_msg += "  - `details`: Configuration summary (e.g., 'Channel: #support')\n"
+                
+                error_msg += "\n**Forbidden fields:** `type`, `config`, `name` (in steps), `next_steps`, `condition`\n"
+                
+                st.error(error_msg)
+                st.session_state.messages.append({
+                    "role": "assistant", 
+                    "content": "I encountered a validation error. Please try rephrasing your request with simpler, more direct instructions."
+                })
             except Exception as e:
-                st.error(f"AI Error: {e}")
+                error_msg = f"**Error:** {str(e)}\n\n"
+                error_msg += "This might be due to the AI generating invalid JSON or not following the schema. "
+                error_msg += "Please try rephrasing your request."
+                st.error(error_msg)
+                st.session_state.messages.append({
+                    "role": "assistant", 
+                    "content": "I encountered an error processing your request. Please try again with a clearer description."
+                })
 
 # --- 6. MAIN PANEL: VISUALIZATION ---
 col1, col2 = st.columns([2, 1])
