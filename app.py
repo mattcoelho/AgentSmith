@@ -956,8 +956,8 @@ with col2:
                                     const prevSibling = parent.previousSibling;
                                     if (prevSibling && prevSibling.textContent) {{
                                         const trimmed = prevSibling.textContent.trim();
-                                        const openBrace = String.fromCharCode(123); // '{'
-                                        if (trimmed === openBrace) {{
+                                        // Check for opening brace character
+                                        if (trimmed.length === 1 && trimmed.charCodeAt(0) === 123) {{
                                             parent.parentElement.insertBefore(anchor, parent);
                                             return;
                                         }}
