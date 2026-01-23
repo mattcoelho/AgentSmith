@@ -662,79 +662,57 @@ with col1:
             const stepIds = {step_ids_json};
             
             svgs.forEach(svg => {{
-                // Find all node groups (graphviz nodes are in <g> elements)
-                // Graphviz uses the step ID as part of the node ID
-                const nodes = svg.querySelectorAll('g');
+                // Find graphviz node groups - graphviz creates nodes with class "node"
+                const nodes = svg.querySelectorAll('g.node');
                 
-                nodes.forEach(node => {{
-                    // Get the node's ID - graphviz typically uses step ID directly or with "node" prefix
+                console.log('Found', nodes.length, 'graphviz nodes');
+                
+                nodes.forEach((node, nodeIndex) => {{
+                    // Get the node's ID - graphviz uses step ID directly as node ID
                     const nodeId = node.getAttribute('id') || '';
-                    const titleElement = node.querySelector('title');
-                    const titleText = titleElement ? titleElement.textContent : '';
+                    console.log('Processing node', nodeIndex, 'with ID:', nodeId);
                     
-                    // Try to find matching step ID with improved matching logic
+                    // Try to find matching step ID with simplified matching logic
                     let matchedStepId = null;
                     
-                    // Method 1: Direct match or contains match in node ID
-                    for (const stepId of stepIds) {{
-                        // Graphviz often uses step ID directly, or with "node" prefix (e.g., "node_step_1" or just "step_1")
-                        const normalizedNodeId = nodeId.toLowerCase().replace(/^node/, '');
-                        const normalizedStepId = stepId.toLowerCase();
-                        
-                        if (nodeId === stepId || 
-                            nodeId === 'node' + stepId ||
-                            normalizedNodeId === normalizedStepId ||
-                            nodeId.includes(stepId) ||
-                            normalizedNodeId.includes(normalizedStepId)) {{
-                            matchedStepId = stepId;
-                            break;
+                    // Method 1: Direct match (graphviz uses step ID directly)
+                    if (stepIds.includes(nodeId)) {{
+                        matchedStepId = nodeId;
+                        console.log('Direct match found:', matchedStepId);
+                    }}
+                    // Method 2: Try with "node" prefix (some graphviz versions add this)
+                    else if (nodeId.startsWith('node') && stepIds.includes(nodeId.substring(4))) {{
+                        matchedStepId = nodeId.substring(4);
+                        console.log('Match with node prefix found:', matchedStepId);
+                    }}
+                    // Method 3: Try removing "node" prefix and matching
+                    else if (nodeId.startsWith('node')) {{
+                        const withoutPrefix = nodeId.substring(4);
+                        if (stepIds.includes(withoutPrefix)) {{
+                            matchedStepId = withoutPrefix;
+                            console.log('Match after removing node prefix:', matchedStepId);
                         }}
                     }}
-                    
-                    // Method 2: Check title element
-                    if (!matchedStepId && titleText) {{
+                    // Method 4: Check if node ID contains any step ID
+                    else {{
                         for (const stepId of stepIds) {{
-                            if (titleText.includes(stepId)) {{
+                            if (nodeId.includes(stepId) || stepId.includes(nodeId)) {{
                                 matchedStepId = stepId;
+                                console.log('Partial match found:', matchedStepId);
                                 break;
                             }}
                         }}
                     }}
                     
-                    // Method 3: Check all text content in the node (app name, action, etc.)
-                    if (!matchedStepId) {{
-                        const allText = node.textContent || node.innerText || '';
-                        // Look for step ID in the text, but be careful - step IDs might appear in content
-                        // So we'll prioritize exact matches in specific patterns
-                        for (const stepId of stepIds) {{
-                            // Check if step ID appears as a standalone identifier
-                            const stepIdPattern = new RegExp('\\\\b' + stepId.replace(/[.*+?^${{}}()|[\\\\]\\\\]/g, '\\\\$&') + '\\\\b');
-                            if (stepIdPattern.test(allText)) {{
-                                matchedStepId = stepId;
-                                break;
-                            }}
-                        }}
-                    }}
-                    
-                    // Method 4: Use graphviz's internal structure - nodes are often in order
-                    // This is a fallback - match by index if we can determine node order
-                    if (!matchedStepId && nodeId) {{
-                        // Extract numeric part from node ID (e.g., "node1" -> 1, "step_1" -> 1)
-                        const nodeNumMatch = nodeId.match(/(\\d+)/);
-                        if (nodeNumMatch) {{
-                            const nodeIndex = parseInt(nodeNumMatch[1]) - 1; // Graphviz often 1-indexed
-                            if (nodeIndex >= 0 && nodeIndex < stepIds.length) {{
-                                // Check if this node's text content matches the step at this index
-                                const candidateStepId = stepIds[nodeIndex];
-                                const nodeText = node.textContent || '';
-                                // Verify by checking if node text contains step's app or action
-                                // This is a heuristic but should work for most cases
-                                matchedStepId = candidateStepId;
-                            }}
-                        }}
+                    // Method 5: Fallback - match by index if we can't match by ID
+                    if (!matchedStepId && nodeIndex < stepIds.length) {{
+                        matchedStepId = stepIds[nodeIndex];
+                        console.log('Fallback: matched by index', nodeIndex, '->', matchedStepId);
                     }}
                     
                     if (matchedStepId) {{
+                        console.log('Matched step ID:', matchedStepId, 'for node:', nodeId);
+                        
                         // Make node clickable
                         node.style.cursor = 'pointer';
                         node.style.transition = 'opacity 0.2s';
@@ -750,6 +728,7 @@ with col1:
                         // Add click handler
                         node.addEventListener('click', function(e) {{
                             e.stopPropagation();
+                            console.log('Step clicked:', matchedStepId);
                             
                             // Visual feedback on clicked node
                             const originalOpacity = this.style.opacity;
@@ -762,10 +741,14 @@ with col1:
                             
                             // Scroll to JSON section
                             const anchorId = 'step-' + matchedStepId;
+                            console.log('Looking for anchor:', anchorId);
                             const anchor = document.getElementById(anchorId);
                             const jsonContainer = document.getElementById('json-container');
                             
+                            console.log('Anchor found:', !!anchor, 'Container found:', !!jsonContainer);
+                            
                             if (anchor && jsonContainer) {{
+                                console.log('Scrolling to anchor');
                                 // Calculate scroll position
                                 const containerRect = jsonContainer.getBoundingClientRect();
                                 const anchorRect = anchor.getBoundingClientRect();
@@ -844,25 +827,63 @@ with col1:
                                 }}, 3000);
                                 
                             }} else if (jsonContainer) {{
+                                console.log('Anchor not found, using text-based scrolling fallback');
                                 // Fallback: try to find step ID text and scroll to it
-                                const jsonText = jsonContainer.textContent || '';
-                                const stepPattern = new RegExp('"id"\\\\s*:\\\\s*"(' + matchedStepId.replace(/[.*+?^${{}}()|[\\\\]\\\\]/g, '\\\\$&') + ')"');
+                                const jsonText = jsonContainer.textContent || jsonContainer.innerText || '';
+                                console.log('JSON text length:', jsonText.length);
+                                
+                                const escapedStepId = matchedStepId.replace(/[.*+?^${{}}()|[\\\\]\\\\]/g, '\\\\$&');
+                                const stepPattern = new RegExp('"id"\\\\s*:\\\\s*"(' + escapedStepId + ')"');
                                 const match = stepPattern.exec(jsonText);
                                 
+                                console.log('Step pattern match:', !!match);
+                                
                                 if (match) {{
-                                    // Approximate scroll position (this is less precise)
-                                    const textBeforeMatch = jsonText.substring(0, match.index);
-                                    const linesBefore = textBeforeMatch.split('\\\\n').length;
-                                    const lineHeight = 20; // Approximate line height
-                                    const scrollPosition = linesBefore * lineHeight;
+                                    console.log('Found step ID at position:', match.index);
+                                    // Find all elements in the JSON container
+                                    const allElements = jsonContainer.querySelectorAll('*');
+                                    let foundElement = null;
                                     
-                                    jsonContainer.scrollTo({{
-                                        top: Math.max(0, scrollPosition - 50),
-                                        behavior: 'smooth'
-                                    }});
+                                    // Try to find the element containing this text
+                                    for (const el of allElements) {{
+                                        if (el.textContent && el.textContent.includes('"id": "' + matchedStepId + '"')) {{
+                                            foundElement = el;
+                                            break;
+                                        }}
+                                    }}
+                                    
+                                    if (foundElement) {{
+                                        console.log('Found element containing step ID, scrolling to it');
+                                        foundElement.scrollIntoView({{ behavior: 'smooth', block: 'center' }});
+                                        
+                                        // Highlight the element
+                                        foundElement.style.backgroundColor = '#fff3cd';
+                                        foundElement.style.transition = 'background-color 0.3s';
+                                        setTimeout(() => {{
+                                            foundElement.style.backgroundColor = '';
+                                        }}, 3000);
+                                    }} else {{
+                                        // Approximate scroll position based on text position
+                                        const textBeforeMatch = jsonText.substring(0, match.index);
+                                        const linesBefore = textBeforeMatch.split('\\\\n').length;
+                                        const lineHeight = 20; // Approximate line height
+                                        const scrollPosition = linesBefore * lineHeight;
+                                        
+                                        console.log('Scrolling to approximate position:', scrollPosition);
+                                        jsonContainer.scrollTo({{
+                                            top: Math.max(0, scrollPosition - 50),
+                                            behavior: 'smooth'
+                                        }});
+                                    }}
+                                }} else {{
+                                    console.warn('Could not find step ID in JSON text');
                                 }}
+                            }} else {{
+                                console.error('JSON container not found');
                             }}
                         }});
+                    }} else {{
+                        console.log('No match found for node:', nodeId);
                     }}
                 }});
             }});
@@ -899,81 +920,108 @@ with col2:
         <script>
         (function() {{
             function insertStepAnchors() {{
+                console.log('Attempting to insert step anchors...');
                 const container = document.getElementById('json-container');
                 if (!container) {{
+                    console.log('JSON container not found, retrying...');
                     setTimeout(insertStepAnchors, 200);
                     return;
                 }}
+                
+                console.log('JSON container found');
                 
                 // Find the JSON element (st.json creates a specific structure)
                 const jsonElement = container.querySelector('[data-testid="stJson"], .stJson, pre, code');
                 if (!jsonElement) {{
+                    console.log('JSON element not found, retrying...');
                     setTimeout(insertStepAnchors, 200);
                     return;
                 }}
                 
+                console.log('JSON element found:', jsonElement.tagName);
+                
                 const stepIds = {step_ids_json};
+                console.log('Step IDs to process:', stepIds);
                 const jsonText = jsonElement.textContent || jsonElement.innerText || '';
+                console.log('JSON text length:', jsonText.length);
+                
+                let anchorsInserted = 0;
                 
                 // For each step, find its position and insert an anchor
-                stepIds.forEach(stepId => {{
+                stepIds.forEach((stepId, index) => {{
                     const anchorId = 'step-' + stepId;
                     
                     // Check if anchor already exists
-                    if (document.getElementById(anchorId)) return;
+                    if (document.getElementById(anchorId)) {{
+                        console.log('Anchor already exists for:', stepId);
+                        return;
+                    }}
                     
                     // Find the step in JSON - look for "id": "stepId"
                     const escapedStepId = stepId.replace(/[.*+?^${{}}()|[\\\\]\\\\]/g, '\\\\$&');
-                    const stepPattern = new RegExp('"id"\\\\s*:\\\\s*"(' + escapedStepId + ')"', 'g');
+                    const stepPattern = new RegExp('"id"\\\\s*:\\\\s*"(' + escapedStepId + ')"');
                     const match = stepPattern.exec(jsonText);
                     
                     if (match) {{
-                        // Find the position in the DOM
-                        // We'll insert the anchor by finding the text node or element containing the step ID
-                        const walker = document.createTreeWalker(
-                            jsonElement,
-                            NodeFilter.SHOW_TEXT,
-                            null
-                        );
+                        console.log('Found step ID in JSON text:', stepId, 'at position:', match.index);
                         
-                        let node;
-                        while (node = walker.nextNode()) {{
-                            if (node.textContent.includes('"id": "' + stepId + '"')) {{
-                                // Create anchor element
-                                const anchor = document.createElement('span');
-                                anchor.id = anchorId;
-                                anchor.className = 'step-anchor';
-                                anchor.style.display = 'block';
-                                anchor.style.height = '1px';
-                                anchor.style.width = '1px';
-                                anchor.style.position = 'relative';
-                                anchor.style.top = '-10px';
-                                
-                                // Try to insert before the parent element containing this text
-                                let parent = node.parentElement;
-                                while (parent && parent !== jsonElement) {{
-                                    // Look for the object start brace before this step
-                                    const prevSibling = parent.previousSibling;
-                                    if (prevSibling && prevSibling.textContent) {{
-                                        const trimmed = prevSibling.textContent.trim();
-                                        // Check for opening brace character
-                                        if (trimmed.length === 1 && trimmed.charCodeAt(0) === 123) {{
-                                            parent.parentElement.insertBefore(anchor, parent);
-                                            return;
-                                        }}
+                        // Try to find the element containing this text
+                        const allElements = jsonElement.querySelectorAll('*');
+                        let targetElement = null;
+                        
+                        // Look for element containing the step ID
+                        for (const el of allElements) {{
+                            if (el.textContent && el.textContent.includes('"id": "' + stepId + '"')) {{
+                                // Check if this is the closest parent to the step object start
+                                const text = el.textContent || '';
+                                const stepIndex = text.indexOf('"id": "' + stepId + '"');
+                                if (stepIndex >= 0) {{
+                                    // Look backwards for opening brace
+                                    const beforeStep = text.substring(0, stepIndex);
+                                    const lastBraceIndex = beforeStep.lastIndexOf('{{');
+                                    if (lastBraceIndex >= 0 && lastBraceIndex > beforeStep.length - 50) {{
+                                        targetElement = el;
+                                        break;
                                     }}
-                                    parent = parent.parentElement;
                                 }}
-                                
-                                // Fallback: insert before the text node's parent
-                                if (node.parentElement) {{
-                                    node.parentElement.insertBefore(anchor, node);
-                                }}
-                                break;
                             }}
                         }}
+                        
+                        // If we found a target element, insert anchor before it
+                        if (targetElement && targetElement.parentElement) {{
+                            const anchor = document.createElement('span');
+                            anchor.id = anchorId;
+                            anchor.className = 'step-anchor';
+                            anchor.style.display = 'block';
+                            anchor.style.height = '1px';
+                            anchor.style.width = '1px';
+                            anchor.style.position = 'absolute';
+                            anchor.style.visibility = 'hidden';
+                            
+                            targetElement.parentElement.insertBefore(anchor, targetElement);
+                            anchorsInserted++;
+                            console.log('Inserted anchor for step:', stepId);
+                        }} else {{
+                            // Fallback: insert at the beginning of the JSON element
+                            const anchor = document.createElement('span');
+                            anchor.id = anchorId;
+                            anchor.className = 'step-anchor';
+                            anchor.style.display = 'block';
+                            anchor.style.height = '1px';
+                            anchor.style.width = '1px';
+                            anchor.style.position = 'absolute';
+                            anchor.style.visibility = 'hidden';
+                            
+                            jsonElement.insertBefore(anchor, jsonElement.firstChild);
+                            anchorsInserted++;
+                            console.log('Inserted anchor at fallback position for step:', stepId);
+                        }}
+                    }} else {{
+                        console.warn('Could not find step ID in JSON:', stepId);
                     }}
                 }});
+                
+                console.log('Total anchors inserted:', anchorsInserted, 'out of', stepIds.length);
             }}
             
             // Wait for JSON to render
@@ -984,6 +1032,7 @@ with col2:
             }}
             setTimeout(insertStepAnchors, 500);
             setTimeout(insertStepAnchors, 1000);
+            setTimeout(insertStepAnchors, 2000);
         }})();
         </script>
         """
