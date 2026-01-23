@@ -642,6 +642,84 @@ with col1:
     }}
     """
     st.graphviz_chart(graph_code, use_container_width=True)
+    
+    # Add simple click-to-scroll functionality (non-intrusive)
+    steps = st.session_state.workflow_data.steps
+    if steps:
+        step_ids_json = json.dumps([step.id for step in steps])
+        click_script = f"""
+        <script>
+        (function() {{
+            function setupClickHandlers() {{
+                // Find graphviz SVG in workflow column
+                const workflowCol = document.querySelector('[data-testid="stVerticalBlock"] > div:first-child');
+                if (!workflowCol) {{
+                    setTimeout(setupClickHandlers, 200);
+                    return;
+                }}
+                
+                const svg = workflowCol.querySelector('svg');
+                if (!svg) {{
+                    setTimeout(setupClickHandlers, 200);
+                    return;
+                }}
+                
+                const stepIds = {step_ids_json};
+                const nodes = svg.querySelectorAll('g.node');
+                
+                // Match nodes to steps by index (simplest approach)
+                nodes.forEach((node, index) => {{
+                    if (index >= stepIds.length) return;
+                    const stepId = stepIds[index];
+                    
+                    // Only add click handler - don't modify other behaviors
+                    node.style.cursor = 'pointer';
+                    node.addEventListener('click', function(e) {{
+                        // Only handle simple left-clicks without modifiers
+                        if (e.button !== 0 || e.ctrlKey || e.metaKey || e.shiftKey || e.altKey) {{
+                            return; // Allow zoom/pan to work normally
+                        }}
+                        
+                        // Find JSON container
+                        const jsonContainer = document.getElementById('json-container');
+                        if (!jsonContainer) return;
+                        
+                        // Find step ID in JSON text
+                        const jsonText = jsonContainer.textContent || '';
+                        const stepPattern = new RegExp('"id"\\\\s*:\\\\s*"(' + stepId.replace(/[.*+?^${{}}()|[\\\\]\\\\]/g, '\\\\$&') + ')"');
+                        const match = stepPattern.exec(jsonText);
+                        
+                        if (match) {{
+                            // Calculate approximate scroll position
+                            const textBefore = jsonText.substring(0, match.index);
+                            const lines = (textBefore.match(/\\\\n/g) || []).length;
+                            const scrollPos = lines * 22; // Approximate line height
+                            
+                            // Scroll smoothly to the step
+                            jsonContainer.scrollTo({{
+                                top: Math.max(0, scrollPos - 50),
+                                behavior: 'smooth'
+                            }});
+                            
+                            // Brief visual feedback on node
+                            const original = this.style.opacity;
+                            this.style.opacity = '0.6';
+                            setTimeout(() => {{ this.style.opacity = original || '1'; }}, 300);
+                        }}
+                    }});
+                }});
+            }}
+            
+            if (document.readyState === 'loading') {{
+                document.addEventListener('DOMContentLoaded', setupClickHandlers);
+            }} else {{
+                setupClickHandlers();
+            }}
+            setTimeout(setupClickHandlers, 500);
+        }})();
+        </script>
+        """
+        st.markdown(click_script, unsafe_allow_html=True)
 
 with col2:
     st.markdown("### 🛠️ Configuration")
