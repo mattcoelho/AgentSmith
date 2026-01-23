@@ -16,6 +16,12 @@ st.markdown("""
     .main-header {font-size: 2.5rem; font-weight: 700; margin-bottom: 0rem; color: #333;}
     .sub-header {font-size: 1rem; color: #666; margin-bottom: 2rem;}
     .card {background-color: #f9f9f9; padding: 20px; border-radius: 10px; border: 1px solid #ddd; margin-bottom: 20px;}
+    .step-highlight {background-color: #fff3cd !important; border: 2px solid #ffc107 !important; border-radius: 4px; padding: 8px; margin: 4px 0;}
+    .step-anchor {scroll-margin-top: 20px;}
+    .json-step-section {padding: 8px; margin: 4px 0; border-radius: 4px; transition: background-color 0.3s;}
+    .json-step-section.highlighted {background-color: #fff3cd; border: 2px solid #ffc107;}
+    svg g.node {cursor: pointer;}
+    svg g.node:hover {opacity: 0.8;}
     </style>
 """, unsafe_allow_html=True)
 
@@ -48,6 +54,8 @@ if "messages" not in st.session_state:
     st.session_state.messages = [
         {"role": "assistant", "content": "Hi! I'm your Workflow Architect. Describe a process you want to automate (e.g., 'When a new lead arrives in Typeform, send them an email and alert the team on Slack')."}
     ]
+if "selected_step_id" not in st.session_state:
+    st.session_state.selected_step_id = None
 
 # --- 4. THE AI ENGINE ---
 if "GROQ_API_KEY" in st.secrets:
@@ -368,6 +376,71 @@ Generated workflow:
 Provide a friendly, conversational response explaining what workflow was created or modified. Be engaging and helpful.""")
 ])
 
+# Function to render JSON with scrollable anchors for each step
+def render_json_with_anchors(workflow: Workflow, selected_step_id: Optional[str] = None) -> str:
+    """Render workflow JSON with HTML anchors for each step."""
+    import json
+    workflow_dict = workflow.model_dump()
+    
+    # Convert to formatted JSON string
+    json_str = json.dumps(workflow_dict, indent=2)
+    
+    # Split JSON into lines and add anchors for steps
+    lines = json_str.split('\n')
+    result_lines = []
+    in_steps_array = False
+    step_brace_indent = None
+    
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        
+        # Detect when we enter the steps array
+        if '"steps"' in line and '[' in line:
+            in_steps_array = True
+            result_lines.append(line)
+            i += 1
+            continue
+        
+        # Detect when we exit the steps array
+        if in_steps_array and line.strip() == ']':
+            in_steps_array = False
+            result_lines.append(line)
+            i += 1
+            continue
+        
+        # Detect step object start '{'
+        if in_steps_array and line.strip() == '{':
+            step_brace_indent = len(line) - len(line.lstrip())
+            result_lines.append(line)
+            i += 1
+            continue
+        
+        # Detect step ID line to add anchor before the step object
+        if in_steps_array and '"id"' in line and step_brace_indent is not None:
+            import re
+            match = re.search(r'"id"\s*:\s*"([^"]+)"', line)
+            if match:
+                step_id = match.group(1)
+                anchor_id = f"step-{step_id}"
+                # Insert anchor right after the opening brace
+                # Find the last '{' line we added
+                for j in range(len(result_lines) - 1, -1, -1):
+                    if result_lines[j].strip() == '{' and len(result_lines[j]) - len(result_lines[j].lstrip()) == step_brace_indent:
+                        # Add anchor on the next line with proper indent
+                        anchor_line = ' ' * (step_brace_indent + 2) + f'<a id="{anchor_id}" class="step-anchor"></a>'
+                        result_lines.insert(j + 1, anchor_line)
+                        break
+                step_brace_indent = None
+        
+        result_lines.append(line)
+        i += 1
+    
+    # Join lines and wrap in container
+    json_html = '\n'.join(result_lines)
+    html_content = f'<div id="json-container" style="background-color: #f8f9fa; padding: 15px; border-radius: 5px; overflow-x: auto; max-height: 600px; overflow-y: auto;"><pre style="margin: 0;">{json_html}</pre></div>'
+    return html_content
+
 # Function to format workflow as a readable summary for conversational LLM
 def format_workflow_summary(workflow: Workflow) -> str:
     """Format a workflow into a readable text summary."""
@@ -578,8 +651,130 @@ with col1:
     }}
     """
     st.graphviz_chart(graph_code, use_container_width=True)
+    
+    # Inject JavaScript to add click handlers to graphviz nodes
+    step_ids_list = [step.id for step in steps]
+    step_ids_json = json.dumps(step_ids_list)
+    
+    javascript_code = f"""
+    <script>
+    (function() {{
+        function addClickHandlers() {{
+            // Find all SVG elements (graphviz renders as SVG)
+            const svgs = document.querySelectorAll('svg');
+            if (svgs.length === 0) {{
+                // Retry if SVG not loaded yet
+                setTimeout(addClickHandlers, 200);
+                return;
+            }}
+            
+            const stepIds = {step_ids_json};
+            
+            svgs.forEach(svg => {{
+                // Find all node groups (graphviz nodes are in <g> elements)
+                // Graphviz uses the step ID as part of the node ID
+                const nodes = svg.querySelectorAll('g');
+                
+                nodes.forEach(node => {{
+                    // Get the node's ID - graphviz format varies, try to extract step ID
+                    const nodeId = node.getAttribute('id') || '';
+                    const titleElement = node.querySelector('title');
+                    const titleText = titleElement ? titleElement.textContent : '';
+                    
+                    // Try to find matching step ID
+                    let matchedStepId = null;
+                    for (const stepId of stepIds) {{
+                        // Graphviz may use the step ID directly or with modifications
+                        if (nodeId.includes(stepId) || titleText.includes(stepId) || 
+                            nodeId.replace(/[^a-zA-Z0-9_]/g, '') === stepId.replace(/[^a-zA-Z0-9_]/g, '')) {{
+                            matchedStepId = stepId;
+                            break;
+                        }}
+                    }}
+                    
+                    // Also check text content of the node for step ID
+                    if (!matchedStepId) {{
+                        const textElements = node.querySelectorAll('text');
+                        textElements.forEach(textEl => {{
+                            const text = textEl.textContent || '';
+                            for (const stepId of stepIds) {{
+                                if (text.includes(stepId)) {{
+                                    matchedStepId = stepId;
+                                    return;
+                                }}
+                            }}
+                        }});
+                    }}
+                    
+                    if (matchedStepId) {{
+                        // Make node clickable
+                        node.style.cursor = 'pointer';
+                        node.style.transition = 'opacity 0.2s';
+                        
+                        // Add hover effect
+                        node.addEventListener('mouseenter', function() {{
+                            this.style.opacity = '0.7';
+                        }});
+                        node.addEventListener('mouseleave', function() {{
+                            this.style.opacity = '1';
+                        }});
+                        
+                        // Add click handler
+                        node.addEventListener('click', function(e) {{
+                            e.stopPropagation();
+                            
+                            // Scroll to JSON section
+                            const anchorId = 'step-' + matchedStepId;
+                            const anchor = document.getElementById(anchorId);
+                            if (anchor) {{
+                                // Scroll the JSON container to show the anchor
+                                const jsonContainer = document.getElementById('json-container');
+                                if (jsonContainer) {{
+                                    const containerRect = jsonContainer.getBoundingClientRect();
+                                    const anchorRect = anchor.getBoundingClientRect();
+                                    const scrollTop = jsonContainer.scrollTop + anchorRect.top - containerRect.top - 50;
+                                    jsonContainer.scrollTo({{
+                                        top: scrollTop,
+                                        behavior: 'smooth'
+                                    }});
+                                    
+                                    // Highlight the anchor area
+                                    anchor.style.backgroundColor = '#fff3cd';
+                                    anchor.style.padding = '2px 4px';
+                                    anchor.style.borderRadius = '3px';
+                                    setTimeout(() => {{
+                                        anchor.style.backgroundColor = '';
+                                        anchor.style.padding = '';
+                                        anchor.style.borderRadius = '';
+                                    }}, 2000);
+                                }} else {{
+                                    anchor.scrollIntoView({{ behavior: 'smooth', block: 'center' }});
+                                }}
+                            }}
+                        }});
+                    }}
+                }});
+            }});
+        }}
+        
+        // Wait for page to load and SVG to render
+        if (document.readyState === 'loading') {{
+            document.addEventListener('DOMContentLoaded', addClickHandlers);
+        }} else {{
+            addClickHandlers();
+        }}
+        
+        // Retry after delays to catch dynamically loaded content
+        setTimeout(addClickHandlers, 500);
+        setTimeout(addClickHandlers, 1000);
+    }})();
+    </script>
+    """
+    st.markdown(javascript_code, unsafe_allow_html=True)
 
 with col2:
     st.markdown("### 🛠️ Configuration")
     st.caption("Live JSON generated by Llama 3")
-    st.json(st.session_state.workflow_data.model_dump())
+    # Render JSON with scrollable anchors
+    json_html = render_json_with_anchors(st.session_state.workflow_data, st.session_state.selected_step_id)
+    st.markdown(json_html, unsafe_allow_html=True)
