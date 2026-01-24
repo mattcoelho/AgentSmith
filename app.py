@@ -785,9 +785,23 @@ with col2:
         overflow-x: auto;
         border: 1px solid #ddd;
         border-radius: 5px;
-        padding: 15px;
+        padding: 8px;
         background-color: #f8f9fa;
         box-shadow: inset 0 1px 3px rgba(0,0,0,0.1);
+        margin: 0;
+    }
+    .json-scroll-container > * {
+        margin: 0 !important;
+        padding: 0 !important;
+    }
+    .json-scroll-container [data-testid="stJson"],
+    .json-scroll-container [data-testid="stJson"] > * {
+        margin: 0 !important;
+        padding: 0 !important;
+    }
+    div[data-testid="stJson"] {
+        margin: 0 !important;
+        padding: 0 !important;
     }
     .json-scroll-container::-webkit-scrollbar {
         width: 8px;
@@ -807,7 +821,8 @@ with col2:
     </style>
     """, unsafe_allow_html=True)
     
-    # Wrap JSON in scrollable container
-    st.markdown('<div class="json-scroll-container" id="json-container">', unsafe_allow_html=True)
-    st.json(st.session_state.workflow_data.model_dump())
-    st.markdown('</div>', unsafe_allow_html=True)
+    # Use container to better control layout
+    with st.container():
+        st.markdown('<div class="json-scroll-container" id="json-container">', unsafe_allow_html=True)
+        st.json(st.session_state.workflow_data.model_dump())
+        st.markdown('</div>', unsafe_allow_html=True)
