@@ -56,25 +56,42 @@ if "messages" not in st.session_state:
     ]
 if "selected_step_id" not in st.session_state:
     st.session_state.selected_step_id = None
+if "user_api_key" not in st.session_state:
+    st.session_state.user_api_key = None
+if "rate_limit_hit" not in st.session_state:
+    st.session_state.rate_limit_hit = False
 
 # --- 4. THE AI ENGINE ---
-if "GROQ_API_KEY" in st.secrets:
+# Use user-provided API key if available, otherwise fallback to secrets
+if st.session_state.user_api_key:
+    api_key = st.session_state.user_api_key
+elif "GROQ_API_KEY" in st.secrets:
     api_key = st.secrets["GROQ_API_KEY"]
 else:
-    st.error("🚨 GROQ_API_KEY missing from secrets.")
-    st.stop()
+    api_key = None
 
-# Enable JSON mode for structured output
-llm = ChatGroq(
-    model="llama-3.3-70b-versatile", 
-    api_key=api_key,
-    model_kwargs={"response_format": {"type": "json_object"}}
-)
-# Separate LLM for conversational responses (without JSON mode)
-conversational_llm = ChatGroq(
-    model="llama-3.3-70b-versatile",
-    api_key=api_key
-)
+# Function to initialize LLM instances
+def initialize_llms(api_key):
+    if not api_key:
+        return None, None
+    llm = ChatGroq(
+        model="llama-3.3-70b-versatile", 
+        api_key=api_key,
+        model_kwargs={"response_format": {"type": "json_object"}}
+    )
+    conversational_llm = ChatGroq(
+        model="llama-3.3-70b-versatile",
+        api_key=api_key
+    )
+    return llm, conversational_llm
+
+# Initialize LLMs
+llm, conversational_llm = initialize_llms(api_key)
+
+# Show error if no API key available
+if not api_key:
+    st.error("🚨 No API key available. Please provide a Groq API key when prompted.")
+    st.stop()
 parser = PydanticOutputParser(pydantic_object=Workflow)
 format_instructions = parser.get_format_instructions()
 
@@ -541,6 +558,25 @@ with st.sidebar:
         with st.chat_message(msg["role"], avatar=avatar):
             st.write(msg["content"])
 
+    # Show API key input in sidebar if rate limit was hit
+    if st.session_state.rate_limit_hit:
+        st.markdown("---")
+        st.markdown("### API Key")
+        st.caption("Rate limit reached. Enter your own key to continue.")
+        sidebar_key_input = st.text_input(
+            "Groq API Key",
+            type="password",
+            value=st.session_state.user_api_key or "",
+            help="Enter your Groq API key",
+            key="sidebar_api_key_input"
+        )
+        
+        if sidebar_key_input and sidebar_key_input != st.session_state.user_api_key:
+            st.session_state.user_api_key = sidebar_key_input
+            st.session_state.rate_limit_hit = False
+            st.success("API key updated!")
+            st.rerun()
+    
     if user_input := st.chat_input("Describe your workflow..."):
         st.session_state.messages.append({"role": "user", "content": user_input})
         with st.chat_message("user", avatar="👤"):
@@ -658,15 +694,37 @@ Provide a friendly, helpful response asking the user to rephrase their request w
                     
                     error_msg += "**Options:**\n"
                     error_msg += "- Wait for the rate limit to reset\n"
-                    error_msg += "- Upgrade your Groq API tier at https://console.groq.com/settings/billing\n"
+                    error_msg += "- Enter your own Groq API key below to continue\n"
                     error_msg += "- Try again later\n"
                     
                     st.error(error_msg)
                     
+                    # Set flag to show API key input
+                    st.session_state.rate_limit_hit = True
+                    
+                    # Show API key input field
+                    st.markdown("---")
+                    st.markdown("### Enter Your Own API Key")
+                    st.caption("If you have your own Groq API key, enter it below to continue using the app.")
+                    user_key_input = st.text_input(
+                        "Groq API Key",
+                        type="password",
+                        value=st.session_state.user_api_key or "",
+                        help="Enter your Groq API key. Get one at https://console.groq.com/keys",
+                        key="api_key_input"
+                    )
+                    
+                    if user_key_input and user_key_input != st.session_state.user_api_key:
+                        # User provided a new API key
+                        st.session_state.user_api_key = user_key_input
+                        st.session_state.rate_limit_hit = False
+                        st.success("API key updated! You can now try your request again.")
+                        st.rerun()
+                    
                     # Don't try to use conversational_llm - it would also fail with rate limit
                     st.session_state.messages.append({
                         "role": "assistant",
-                        "content": "I've hit the API rate limit. Please wait a bit before trying again, or consider upgrading your Groq API plan for higher limits."
+                        "content": "I've hit the API rate limit. You can enter your own Groq API key above to continue, or wait for the rate limit to reset."
                     })
                 else:
                     # Generic error handling for other exceptions
