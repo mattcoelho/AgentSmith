@@ -633,32 +633,76 @@ Provide a friendly, helpful response asking the user to rephrase their request w
                     "content": error_response.content
                 })
             except Exception as e:
-                error_msg = f"**Error:** {str(e)}\n\n"
-                error_msg += "This might be due to the AI generating invalid JSON or not following the schema. "
-                error_msg += "Please try rephrasing your request."
-                st.error(error_msg)
+                error_str = str(e)
                 
-                # Generate conversational error response
-                error_conversational_prompt = ChatPromptTemplate.from_messages([
-                    ("system", """You are a friendly Workflow Architect assistant. 
+                # Check for rate limit error (429)
+                if "429" in error_str or "rate limit" in error_str.lower() or "Rate limit" in error_str:
+                    # Parse rate limit information from error message
+                    import re
+                    wait_time_match = re.search(r'Please try again in ([\dhm\s.]+)', error_str)
+                    tokens_match = re.search(r'Limit (\d+), Used (\d+)', error_str)
+                    
+                    error_msg = "**Rate Limit Reached**\n\n"
+                    error_msg += "You've reached the daily token limit for the Groq API.\n\n"
+                    
+                    if tokens_match:
+                        limit = tokens_match.group(1)
+                        used = tokens_match.group(2)
+                        error_msg += f"**Usage:** {used:,} / {limit:,} tokens used today\n\n"
+                    
+                    if wait_time_match:
+                        wait_time = wait_time_match.group(1).strip()
+                        error_msg += f"**Wait time:** {wait_time}\n\n"
+                    else:
+                        error_msg += "**Wait time:** Approximately 1 hour\n\n"
+                    
+                    error_msg += "**Options:**\n"
+                    error_msg += "- Wait for the rate limit to reset\n"
+                    error_msg += "- Upgrade your Groq API tier at https://console.groq.com/settings/billing\n"
+                    error_msg += "- Try again later\n"
+                    
+                    st.error(error_msg)
+                    
+                    # Don't try to use conversational_llm - it would also fail with rate limit
+                    st.session_state.messages.append({
+                        "role": "assistant",
+                        "content": "I've hit the API rate limit. Please wait a bit before trying again, or consider upgrading your Groq API plan for higher limits."
+                    })
+                else:
+                    # Generic error handling for other exceptions
+                    error_msg = f"**Error:** {error_str}\n\n"
+                    error_msg += "This might be due to the AI generating invalid JSON or not following the schema. "
+                    error_msg += "Please try rephrasing your request."
+                    st.error(error_msg)
+                    
+                    # Generate conversational error response (only if not rate limited)
+                    try:
+                        error_conversational_prompt = ChatPromptTemplate.from_messages([
+                            ("system", """You are a friendly Workflow Architect assistant. 
 When there's an error processing a request, provide a helpful, conversational response that:
 - Acknowledges the error in a friendly way
 - Suggests the user try again with a clearer description
 - Keeps it brief and encouraging"""),
-                    ("user", """The user requested: {user_input}
+                            ("user", """The user requested: {user_input}
 
 An error occurred while processing the request: {error_message}
 
 Provide a friendly, helpful response asking the user to try again with a clearer description.""")
-                ])
-                error_response = (error_conversational_prompt | conversational_llm).invoke({
-                    "user_input": user_input,
-                    "error_message": str(e)
-                })
-                st.session_state.messages.append({
-                    "role": "assistant", 
-                    "content": error_response.content
-                })
+                        ])
+                        error_response = (error_conversational_prompt | conversational_llm).invoke({
+                            "user_input": user_input,
+                            "error_message": error_str
+                        })
+                        st.session_state.messages.append({
+                            "role": "assistant",
+                            "content": error_response.content
+                        })
+                    except Exception as inner_e:
+                        # If conversational_llm also fails, just add a simple message
+                        st.session_state.messages.append({
+                            "role": "assistant",
+                            "content": "I encountered an error processing your request. Please try again with a clearer description."
+                        })
 
 # --- 6. MAIN PANEL: VISUALIZATION ---
 col1, col2 = st.columns([2, 1])
