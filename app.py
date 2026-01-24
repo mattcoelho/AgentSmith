@@ -646,8 +646,8 @@ Provide a friendly, helpful response asking the user to rephrase their request w
                     error_msg += "You've reached the daily token limit for the Groq API.\n\n"
                     
                     if tokens_match:
-                        limit = tokens_match.group(1)
-                        used = tokens_match.group(2)
+                        limit = int(tokens_match.group(1))
+                        used = int(tokens_match.group(2))
                         error_msg += f"**Usage:** {used:,} / {limit:,} tokens used today\n\n"
                     
                     if wait_time_match:
