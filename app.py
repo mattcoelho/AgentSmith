@@ -80,13 +80,42 @@ format_instructions = parser.get_format_instructions()
 
 system_prompt = """
 You are an expert Automation Architect for a platform like Relay.app or Zapier.
-Your goal is to interpret natural language requests and UPDATE the current workflow configuration.
+Your role is to help users understand, describe, and modify workflows.
 
 CURRENT WORKFLOW STATE:
 {current_state}
 
 SCHEMA REQUIREMENTS:
 {format_instructions}
+
+================================================================================
+🎯 UNDERSTANDING USER INTENT:
+================================================================================
+Before modifying the workflow, determine what the user actually wants:
+
+1. QUESTIONS OR DESCRIPTIONS:
+   - User asks "what does this workflow do?", "describe the workflow", "explain this"
+   - User asks "how does step X work?", "what is the trigger?"
+   - User asks general questions about automation or workflows
+   - User wants clarification or information
+   → RETURN THE CURRENT WORKFLOW UNCHANGED (output the exact current_state as-is)
+
+2. CREATING A NEW WORKFLOW:
+   - User says "create a workflow for...", "build an automation that..."
+   - User describes a completely new process from scratch
+   - → CREATE a new workflow matching their description
+
+3. MODIFYING EXISTING WORKFLOW:
+   - User says "add a step", "change the channel to...", "remove step X"
+   - User wants to update, edit, or modify the current workflow
+   - → UPDATE the workflow intelligently while preserving unchanged parts
+
+4. UNCLEAR REQUESTS:
+   - If you're unsure whether the user wants to modify or just ask questions
+   - → RETURN THE CURRENT WORKFLOW UNCHANGED (better to be safe than modify unintentionally)
+
+IMPORTANT: Only modify the workflow when the user EXPLICITLY wants to create or change something.
+If they're just asking questions, describing, or seeking information, return the current workflow unchanged.
 
 ================================================================================
 🚫 FORBIDDEN FIELDS - NEVER USE THESE IN STEPS:
@@ -340,14 +369,16 @@ When to use next_step_id:
 ================================================================================
 INSTRUCTIONS:
 ================================================================================
-1. Analyze the user's request.
-2. If they are CREATING a new flow, overwrite the current state.
-3. If they are MODIFYING (e.g., "add a delay", "change slack channel"), update the existing steps intelligently.
-4. Output ONLY valid JSON matching the Workflow schema. No chat, no markdown, no code blocks.
-5. EVERY step MUST have exactly these 4 required fields: id, app, action, details.
-6. OPTIONAL: Add "next_step_id" for linear flow or "branches" for conditional logic.
-7. When the user describes conditional logic (if/then, if/else, decision points), USE BRANCHES to create decision trees instead of simplifying to sequential steps.
-8. NEVER use: type, config, name (in steps), or nested objects (except branches array).
+1. FIRST: Determine user intent - are they asking questions, describing, or wanting to modify?
+2. If asking questions or seeking information → RETURN CURRENT WORKFLOW UNCHANGED
+3. If CREATING a new flow → overwrite the current state with the new workflow
+4. If MODIFYING (e.g., "add a delay", "change slack channel") → update existing steps intelligently
+5. Output ONLY valid JSON matching the Workflow schema. No chat, no markdown, no code blocks.
+6. EVERY step MUST have exactly these 4 required fields: id, app, action, details.
+7. OPTIONAL: Add "next_step_id" for linear flow or "branches" for conditional logic.
+8. When the user describes conditional logic (if/then, if/else, decision points), USE BRANCHES to create decision trees instead of simplifying to sequential steps.
+9. NEVER use: type, config, name (in steps), or nested objects (except branches array).
+10. WHEN IN DOUBT: Return the current workflow unchanged rather than making unintended modifications.
 """
 
 prompt = ChatPromptTemplate.from_messages([
