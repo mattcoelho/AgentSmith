@@ -85,6 +85,22 @@ def initialize_llms(api_key):
     )
     return llm, conversational_llm
 
+# Function to validate API key
+def validate_api_key(api_key):
+    """Test if an API key works by making a simple API call."""
+    if not api_key:
+        return False
+    try:
+        test_llm = ChatGroq(
+            model="llama-3.3-70b-versatile",
+            api_key=api_key
+        )
+        # Make a minimal test call
+        test_llm.invoke("test")
+        return True
+    except Exception:
+        return False
+
 # Initialize LLMs
 llm, conversational_llm = initialize_llms(api_key)
 
@@ -558,25 +574,6 @@ with st.sidebar:
         with st.chat_message(msg["role"], avatar=avatar):
             st.write(msg["content"])
 
-    # Show API key input in sidebar if rate limit was hit
-    if st.session_state.rate_limit_hit:
-        st.markdown("---")
-        st.markdown("### API Key")
-        st.caption("Rate limit reached. Enter your own key to continue.")
-        sidebar_key_input = st.text_input(
-            "Groq API Key",
-            type="password",
-            value=st.session_state.user_api_key or "",
-            help="Enter your Groq API key",
-            key="sidebar_api_key_input"
-        )
-        
-        if sidebar_key_input and sidebar_key_input != st.session_state.user_api_key:
-            st.session_state.user_api_key = sidebar_key_input
-            st.session_state.rate_limit_hit = False
-            st.success("API key updated!")
-            st.rerun()
-    
     if user_input := st.chat_input("Describe your workflow..."):
         st.session_state.messages.append({"role": "user", "content": user_input})
         with st.chat_message("user", avatar="👤"):
@@ -702,24 +699,35 @@ Provide a friendly, helpful response asking the user to rephrase their request w
                     # Set flag to show API key input
                     st.session_state.rate_limit_hit = True
                     
-                    # Show API key input field
-                    st.markdown("---")
-                    st.markdown("### Enter Your Own API Key")
-                    st.caption("If you have your own Groq API key, enter it below to continue using the app.")
-                    user_key_input = st.text_input(
-                        "Groq API Key",
-                        type="password",
-                        value=st.session_state.user_api_key or "",
-                        help="Enter your Groq API key. Get one at https://console.groq.com/keys",
-                        key="api_key_input"
-                    )
-                    
-                    if user_key_input and user_key_input != st.session_state.user_api_key:
-                        # User provided a new API key
-                        st.session_state.user_api_key = user_key_input
-                        st.session_state.rate_limit_hit = False
-                        st.success("API key updated! You can now try your request again.")
-                        st.rerun()
+                    # Show API key input field only if rate limit was hit
+                    if st.session_state.rate_limit_hit:
+                        st.markdown("---")
+                        st.markdown("### Enter Your Own API Key")
+                        st.caption("If you have your own Groq API key, enter it below to continue using the app.")
+                        user_key_input = st.text_input(
+                            "Groq API Key",
+                            type="password",
+                            value=st.session_state.user_api_key or "",
+                            help="Enter your Groq API key. Get one at https://console.groq.com/keys",
+                            key="api_key_input"
+                        )
+                        
+                        if user_key_input:
+                            if user_key_input != st.session_state.user_api_key:
+                                # Validate the API key
+                                with st.spinner("Validating API key..."):
+                                    if validate_api_key(user_key_input):
+                                        # Key is valid
+                                        st.session_state.user_api_key = user_key_input
+                                        st.session_state.rate_limit_hit = False
+                                        # Reinitialize LLMs with new key
+                                        llm, conversational_llm = initialize_llms(user_key_input)
+                                        st.success("✅ API key validated! You can now try your request again.")
+                                        st.rerun()
+                                    else:
+                                        # Key is invalid
+                                        st.error("❌ Invalid API key. Please check your key and try again.")
+                                        st.session_state.user_api_key = None
                     
                     # Don't try to use conversational_llm - it would also fail with rate limit
                     st.session_state.messages.append({
