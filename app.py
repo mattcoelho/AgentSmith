@@ -20,17 +20,11 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # --- 2. DATA MODELS ---
-class Branch(BaseModel):
-    condition: str = Field(description="Condition description (e.g., 'If order status is Shipped', 'If amount > $100')")
-    next_step_id: str = Field(description="ID of the step to execute if condition is true")
-
 class WorkflowStep(BaseModel):
     id: str = Field(description="Unique ID for the step (e.g., 'step_1')")
     app: str = Field(description="The app involved (e.g., 'Slack', 'Gmail', 'Linear')")
     action: str = Field(description="The action to take (e.g., 'Send Message', 'Create Ticket')")
     details: str = Field(description="Short summary of config (e.g., 'Channel: #support')")
-    next_step_id: Optional[str] = Field(default=None, description="Default next step ID for linear flow or default path")
-    branches: Optional[List[Branch]] = Field(default=None, description="Conditional branches for decision points")
 
 class Workflow(BaseModel):
     name: str = Field(description="A creative name for this automation")
@@ -87,23 +81,18 @@ The following fields are FORBIDDEN and will cause validation errors:
 - "name" (use "id" instead)
 - "type" (FORBIDDEN - do not use)
 - "config" (FORBIDDEN - do not use)
-- Any nested objects or arrays in steps (except "branches" which is allowed)
+- "next_steps" (FORBIDDEN - do not use)
+- "condition" (FORBIDDEN - do not use)
+- Any nested objects or arrays in steps
 
 ================================================================================
 ✅ REQUIRED FIELDS - EVERY STEP MUST HAVE EXACTLY THESE 4 FIELDS:
 ================================================================================
-Each step in the "steps" array MUST have exactly these 4 required fields:
+Each step in the "steps" array MUST have exactly these 4 required fields (no more, no less):
 1. "id": A unique identifier string (e.g., "step_1", "step_2", "step_3")
 2. "app": The app/service name (e.g., "Slack", "Gmail", "Linear", "Customer Support System", "Ecommerce Platform")
 3. "action": The action description (e.g., "Send Message", "Create Ticket", "Categorize Issue", "Find Order")
 4. "details": A short summary of configuration (e.g., "Channel: #support", "Category: refund", "Search by customer name")
-
-OPTIONAL FIELDS for branching and decision trees:
-- "next_step_id": Optional string - ID of the default next step (for linear flow or default path)
-- "branches": Optional array of Branch objects - Conditional branches for decision points
-  Each Branch has:
-    - "condition": String describing the condition (e.g., "If order status is Shipped", "If amount > $100")
-    - "next_step_id": String ID of the step to execute if condition is true
 
 ================================================================================
 ✅ CORRECT EXAMPLES:
@@ -158,118 +147,19 @@ EXAMPLE 3 - Customer Support Flow:
       "id": "step_1",
       "app": "Gmail",
       "action": "Send Auto-Reply",
-      "details": "Template: acknowledgment message",
-      "next_step_id": "step_2"
+      "details": "Template: acknowledgment message"
     }},
     {{
       "id": "step_2",
       "app": "Linear",
       "action": "Create Ticket",
-      "details": "Project: Support, Priority: High",
-      "next_step_id": "step_3"
+      "details": "Project: Support, Priority: High"
     }},
     {{
       "id": "step_3",
       "app": "Slack",
       "action": "Notify Team",
       "details": "Channel: #support-alerts"
-    }}
-  ]
-}}
-
-EXAMPLE 4 - Branched Decision Tree Workflow:
-{{
-  "name": "Order Processing with Conditions",
-  "trigger": "New Order Received",
-  "steps": [
-    {{
-      "id": "step_1",
-      "app": "Ecommerce Platform",
-      "action": "Get Order Details",
-      "details": "Retrieve order amount and status",
-      "next_step_id": "step_2"
-    }},
-    {{
-      "id": "step_2",
-      "app": "Ecommerce Platform",
-      "action": "Check Order Amount",
-      "details": "Evaluate order value",
-      "branches": [
-        {{
-          "condition": "If order amount > $100",
-          "next_step_id": "step_3"
-        }},
-        {{
-          "condition": "If order amount <= $100",
-          "next_step_id": "step_4"
-        }}
-      ]
-    }},
-    {{
-      "id": "step_3",
-      "app": "Slack",
-      "action": "Notify High Value Order",
-      "details": "Channel: #high-value-orders",
-      "next_step_id": "step_5"
-    }},
-    {{
-      "id": "step_4",
-      "app": "Gmail",
-      "action": "Send Standard Confirmation",
-      "details": "Template: standard order confirmation",
-      "next_step_id": "step_5"
-    }},
-    {{
-      "id": "step_5",
-      "app": "Ecommerce Platform",
-      "action": "Process Payment",
-      "details": "Charge customer and update order"
-    }}
-  ]
-}}
-
-EXAMPLE 5 - Multi-Way Branch:
-{{
-  "name": "Issue Categorization Workflow",
-  "trigger": "New Customer Message",
-  "steps": [
-    {{
-      "id": "step_1",
-      "app": "Customer Support System",
-      "action": "Categorize Issue",
-      "details": "Analyze message content",
-      "branches": [
-        {{
-          "condition": "If category is refund",
-          "next_step_id": "step_2"
-        }},
-        {{
-          "condition": "If category is replacement",
-          "next_step_id": "step_3"
-        }},
-        {{
-          "condition": "If category is cancellation",
-          "next_step_id": "step_4"
-        }}
-      ]
-    }},
-    {{
-      "id": "step_2",
-      "app": "Ecommerce Platform",
-      "action": "Process Refund",
-      "details": "Initiate refund workflow"
-    }},
-    {{
-      "id": "step_3",
-      "app": "Ecommerce Platform",
-      "action": "Initiate Replacement",
-      "details": "Create replacement order"
-    }},
-    {{
-      "id": "step_4",
-      "app": "Ecommerce Platform",
-      "action": "Process Cancellation",
-      "details": "Cancel order if not shipped"
     }}
   ]
 }}
@@ -308,38 +198,15 @@ CORRECT VERSION of the above:
 }}
 
 ================================================================================
-🌳 BRANCHED WORKFLOWS - DECISION TREES:
-================================================================================
-When the user describes conditional logic (if/then, if/else, decision points), use BRANCHES:
-
-- Use "branches" array when a step has multiple possible next steps based on conditions
-- Use "next_step_id" for linear flow or the default path when no branches match
-- Each branch must have a clear "condition" description and "next_step_id"
-- Steps with branches create decision points in the workflow
-- Multiple branches allow for if/else if/else patterns
-
-When to use branches:
-- User says "if X then Y, else Z"
-- User describes conditional logic or decision points
-- User mentions "depending on", "based on", "when", "if"
-- User wants different paths for different scenarios
-
-When to use next_step_id:
-- Simple linear flow (step 1 -> step 2 -> step 3)
-- Default path when branches don't match
-- Final step in a branch path
-
-================================================================================
 INSTRUCTIONS:
 ================================================================================
 1. Analyze the user's request.
 2. If they are CREATING a new flow, overwrite the current state.
 3. If they are MODIFYING (e.g., "add a delay", "change slack channel"), update the existing steps intelligently.
 4. Output ONLY valid JSON matching the Workflow schema. No chat, no markdown, no code blocks.
-5. EVERY step MUST have exactly these 4 required fields: id, app, action, details.
-6. OPTIONAL: Add "next_step_id" for linear flow or "branches" for conditional logic.
-7. When the user describes conditional logic (if/then, if/else, decision points), USE BRANCHES to create decision trees instead of simplifying to sequential steps.
-8. NEVER use: type, config, name (in steps), or nested objects (except branches array).
+5. EVERY step MUST have exactly these 4 fields: id, app, action, details.
+6. NEVER use: type, config, name (in steps), next_steps, condition, or nested objects.
+7. If the user describes complex logic, simplify it into sequential steps with clear actions.
 """
 
 prompt = ChatPromptTemplate.from_messages([
@@ -375,18 +242,10 @@ def format_workflow_summary(workflow: Workflow) -> str:
     summary += f"Trigger: {workflow.trigger}\n"
     summary += f"Steps ({len(workflow.steps)}):\n"
     for i, step in enumerate(workflow.steps, 1):
-        summary += f"  {i}. {step.id}: {step.app} - {step.action}"
+        summary += f"  {i}. {step.app} - {step.action}"
         if step.details:
             summary += f" ({step.details})"
         summary += "\n"
-        
-        # Add branch information
-        if step.branches:
-            summary += "      Branches:\n"
-            for branch in step.branches:
-                summary += f"        - {branch.condition} -> {branch.next_step_id}\n"
-        elif step.next_step_id:
-            summary += f"      Next: {step.next_step_id}\n"
     return summary
 
 # --- 5. SIDEBAR: CHAT ---
@@ -524,57 +383,30 @@ with col1:
     st.markdown('<p class="main-header">⚡ Relay Lite</p>', unsafe_allow_html=True)
     st.markdown(f'<p class="sub-header">Current Flow: <b>{st.session_state.workflow_data.name}</b></p>', unsafe_allow_html=True)
 
-    # GRAPHVIZ RENDERER with branch support
-    steps = st.session_state.workflow_data.steps
-    step_ids = {step.id: step for step in steps}
-    
-    # Build node definitions
-    node_definitions = []
-    for step in steps:
-        # Use diamond shape for decision points (steps with branches)
-        shape = "diamond" if step.branches else "box"
-        node_definitions.append(
-            f'{step.id} [label=<{step.app}<BR/><FONT POINT-SIZE="10">{step.action}</FONT><BR/><FONT POINT-SIZE="8" COLOR="#555">{step.details}</FONT>>, shape={shape}, style="filled,rounded", fillcolor="white", color="#ddd", penwidth=1];'
-        )
-    
-    # Build edge definitions
-    edge_definitions = []
-    
-    # Connect start to first step (if exists)
-    if steps:
-        first_step_id = steps[0].id
-        edge_definitions.append(f'start -> {first_step_id};')
-    
-    # Process each step's connections
-    for i, step in enumerate(steps):
-        if step.branches:
-            # Step has branches - create edges for each branch with condition labels
-            for branch in step.branches:
-                # Escape quotes in condition for Graphviz
-                condition = branch.condition.replace('"', '\\"')
-                if branch.next_step_id in step_ids:
-                    edge_definitions.append(f'{step.id} -> {branch.next_step_id} [label="{condition}", fontsize=9, color="#4A90E2"];')
-        elif step.next_step_id:
-            # Step has explicit next_step_id
-            if step.next_step_id in step_ids:
-                edge_definitions.append(f'{step.id} -> {step.next_step_id};')
-        else:
-            # Fallback to sequential connection (backward compatibility)
-            if i + 1 < len(steps):
-                edge_definitions.append(f'{step.id} -> {steps[i+1].id};')
-    
+    # GRAPHVIZ RENDERER
     graph_code = f"""
     digraph G {{
         rankdir=TB;
-        node [fontname="Helvetica"];
+        node [shape=box, style="filled,rounded", fontname="Helvetica", penwidth=0];
         edge [fontname="Helvetica", color="#aaaaaa"];
         bgcolor="transparent";
         
-        start [label="{st.session_state.workflow_data.trigger}", fillcolor="#FF4B4B", fontcolor="white", fontsize=12, margin="0.2,0.1", shape=ellipse];
+        start [label="{st.session_state.workflow_data.trigger}", fillcolor="#FF4B4B", fontcolor="white", fontsize=12, margin="0.2,0.1"];
         
-        {chr(10).join(node_definitions)}
-        
-        {chr(10).join(edge_definitions)}
+        {
+            "\n".join([
+                f'{step.id} [label=<{step.app}<BR/><FONT POINT-SIZE="10">{step.action}</FONT><BR/><FONT POINT-SIZE="8" COLOR="#555">{step.details}</FONT>>, fillcolor="white", color="#ddd", penwidth=1];' 
+                for step in st.session_state.workflow_data.steps
+            ])
+        }
+
+        start -> {st.session_state.workflow_data.steps[0].id if st.session_state.workflow_data.steps else "end"};
+        {
+            "\n".join([
+                f"{st.session_state.workflow_data.steps[i].id} -> {st.session_state.workflow_data.steps[i+1].id};"
+                for i in range(len(st.session_state.workflow_data.steps)-1)
+            ])
+        }
     }}
     """
     st.graphviz_chart(graph_code, use_container_width=True)
