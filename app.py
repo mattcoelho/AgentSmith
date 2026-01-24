@@ -807,6 +807,7 @@ with col2:
     </style>
     """, unsafe_allow_html=True)
     
-    # Render JSON with scrollable anchors
-    json_html = render_json_with_anchors(st.session_state.workflow_data, st.session_state.selected_step_id)
-    st.markdown(json_html, unsafe_allow_html=True)
+    # Wrap JSON in scrollable container
+    st.markdown('<div class="json-scroll-container" id="json-container">', unsafe_allow_html=True)
+    st.json(st.session_state.workflow_data.model_dump())
+    st.markdown('</div>', unsafe_allow_html=True)
