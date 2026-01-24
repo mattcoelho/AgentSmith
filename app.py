@@ -344,6 +344,39 @@ CORRECT VERSION of the above:
   "details": "Search by customer name and order number"
 }}
 
+WRONG - Using null in branch.next_step_id:
+{{
+  "id": "step_1",
+  "app": "Ecommerce Platform",
+  "action": "Check Eligibility",
+  "details": "Evaluate if action is possible",
+  "branches": [
+    {{
+      "condition": "If eligible",
+      "next_step_id": "step_2"
+    }},
+    {{
+      "condition": "If not eligible",
+      "next_step_id": null  ❌ FORBIDDEN - must be a step ID string
+    }}
+  ]
+}}
+
+CORRECT VERSION - Omit the branch or use default next_step_id:
+{{
+  "id": "step_1",
+  "app": "Ecommerce Platform",
+  "action": "Check Eligibility",
+  "details": "Evaluate if action is possible",
+  "next_step_id": "step_end",
+  "branches": [
+    {{
+      "condition": "If eligible",
+      "next_step_id": "step_2"
+    }}
+  ]
+}}
+
 ================================================================================
 🌳 BRANCHED WORKFLOWS - DECISION TREES:
 ================================================================================
@@ -351,7 +384,12 @@ When the user describes conditional logic (if/then, if/else, decision points), u
 
 - Use "branches" array when a step has multiple possible next steps based on conditions
 - Use "next_step_id" for linear flow or the default path when no branches match
-- Each branch must have a clear "condition" description and "next_step_id"
+- Each branch MUST have a clear "condition" description and "next_step_id"
+- CRITICAL: branch.next_step_id MUST ALWAYS be a valid step ID string - NEVER use null, None, or empty string
+- If a branch condition should lead to "end" or "do nothing", either:
+  * Omit that branch entirely (let the step's default next_step_id handle it)
+  * Create a final "End" step and point the branch to it
+  * Use the step's next_step_id as the default path instead of creating a branch
 - Steps with branches create decision points in the workflow
 - Multiple branches allow for if/else if/else patterns
 
@@ -377,8 +415,9 @@ INSTRUCTIONS:
 6. EVERY step MUST have exactly these 4 required fields: id, app, action, details.
 7. OPTIONAL: Add "next_step_id" for linear flow or "branches" for conditional logic.
 8. When the user describes conditional logic (if/then, if/else, decision points), USE BRANCHES to create decision trees instead of simplifying to sequential steps.
-9. NEVER use: type, config, name (in steps), or nested objects (except branches array).
-10. WHEN IN DOUBT: Return the current workflow unchanged rather than making unintended modifications.
+9. CRITICAL: In branches array, every branch.next_step_id MUST be a valid step ID string - NEVER null, None, or empty.
+10. NEVER use: type, config, name (in steps), or nested objects (except branches array).
+11. WHEN IN DOUBT: Return the current workflow unchanged rather than making unintended modifications.
 """
 
 prompt = ChatPromptTemplate.from_messages([
